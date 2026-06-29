@@ -1,0 +1,33 @@
+# .bashrc
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+export LANG=en_US.UTF-8
+export LC_ALL=en_US
+
+module load anaconda3
+export PROJ_LIB=/usr/local/python/anaconda3/share/proj/
+
+# User specific aliases and functions
+export PYTHONPATH=$PYTHONPATH:/home/hajsong/pytool
+export XDG_RUNTIME_DIR=/tmp/runtime-hajsong
+#export NETCDF_ROOT="/usr/local/netcdf/432_intel15/"
+#export MPI_INC_DIR="/usr/local/mpi/intel15/openmpi-2.0.2/include/"
+
+alias df="df -H"
+# alias ls="ls --color=tty --show-control-chars"
+# alias hist="history"
+alias lt="ls -rthl"
+alias rm="rm -i"
+alias cp='cp -i'
+alias mv='mv -i'
+alias rm='rm -i'
+alias v='vi'
+alias qstat='qstat -a'
+alias bc="bc -l"
+alias speedck='wget -O /dev/null http://speedtest.wdc01.softlayer.com/downloads/test10.zip'
+alias jnote="jupyter notebook --no-browser --port=8889"
+alias jlab="jupyter lab --no-browser --port=8889"

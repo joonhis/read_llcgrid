@@ -1,0 +1,165 @@
+# NOT COMPLETED
+import numpy as np
+import numpy.ma as ma
+from MITgcmutils import rdmds
+from mitgcmgrid import loadgrid
+from hsongtool import diffsmooth2D_div_inv, calc_localpsi, calc_UV_conv
+import matplotlib.pyplot as plt
+
+def tic():
+    #Homemade version of matlab tic and toc functions
+    import time
+    global startTime_for_tictoc
+    startTime_for_tictoc = time.time()
+
+def toc():
+    import time
+    if 'startTime_for_tictoc' in globals():
+        print "Elapsed time is "+str(time.time() - startTime_for_tictoc) + " seconds."
+    else:
+        print "Toc: start time not set"
+
+# radius for the spatial average (km) 
+xaveragedist = 10;
+yaveragedist = 10;
+dx=5;dy=5;
+#
+# subset of the domain
+#
+yrng=np.arange(0,800)
+xrng=np.arange(0,2800)
+#yrng=np.arange(300,500)
+#xrng=np.arange(1600,1800)
+# Load grid
+grd=loadgrid('dimes50',xrng,yrng,2)
+[lz,ly,lx]=grd.hFacC.shape
+# Load model output
+varname=['U_nondiv','V_nondiv'];
+
+print '   Time mean'
+tidx=3369600
+#
+tmp=rdmds('/Users/hajsong/data_tmp/VELMASS',tidx);
+#ufld=tmp[0,...]/grd.hFacW
+#vfld=tmp[1,...]/grd.hFacS
+ufld=tmp[0,...][:,yrng][:,:,xrng]
+vfld=tmp[1,...][:,yrng][:,:,xrng]
+del tmp
+Us=ufld.copy()*0
+Vs=vfld.copy()*0
+#Um=ufld.0ipy()
+#Vm=vfld.copy()
+#
+#  Compute uTrans, vTrans
+#
+fldU=np.tile(grd.DYG,[lz,1,1])*np.tile(grd.DRF,[1,ly,lx])\
+    *ufld*grd.mskW
+fldV=np.tile(grd.DXG,[lz,1,1])*np.tile(grd.DRF,[1,ly,lx])\
+    *vfld*grd.mskS
+Phi=np.zeros((lz,ly,lx))
+for ik in range(0,1):
+    if ik==0:ddiv=calc_UV_conv(grd,fldU[ik,...],fldV[ik,...])
+    [fldUdiv,fldVdiv,Phi[ik,...]]\
+        =diffsmooth2D_div_inv(grd,fldU[ik,...],fldV[ik,...],ik=ik)
+    fldUdiv=fldUdiv*grd.DRF[ik]*grd.DYG*grd.hFacW[ik,...]*grd.mskW[ik,...]
+    fldVdiv=fldVdiv*grd.DRF[ik]*grd.DXG*grd.hFacS[ik,...]*grd.mskS[ik,...]
+    fldU[ik,...]=fldU[ik,...]-fldUdiv
+    fldV[ik,...]=fldV[ik,...]-fldVdiv
+    if ik==0:div=calc_UV_conv(grd,fldU[ik,...],fldV[ik,...])
+
+#for ix in range(1,lx-1):
+#    for iy in range(1,ly-1):
+dely = int(np.ceil(yaveragedist/(grd.DYC[0,0]/1000)));
+for ix in range(500,501,dx):
+    for iy in range(500,501,dy):
+        tic()
+        delx = int(np.ceil(xaveragedist/(grd.DXC[iy,0]/1000)));
+        xrng=np.arange(ix-delx,ix+delx+1)
+        yrng=np.arange(iy-dely,iy+dely+1)
+        xrngext=np.arange(ix-delx-dx/2,ix+delx+dx/2+1)
+        yrngext=np.arange(iy-dely-dy/2,iy+dely+dy/2+1)
+        # modify the x-range so that ix is the center of the stencil
+        if xrng[0]<0: xrng=np.arange(0,ix*2+1)
+        if xrng[-1]>lx-1: xrng=np.arange(lx+1-(lx-ix)*2,lx)
+        if yrng[0]<0: yrng=np.arange(0,iy*2+1)
+        if yrng[-1]>ly-1: yrng=np.arange(ly+1-(ly-iy)*2,ly)
+        # define the neighbor of ix and iy
+        xx=np.arange(ix-(dx/2),ix+(dx/2)+1)
+        yy=np.arange(iy-(dy/2),iy+(dy/2)+1)
+        #
+        #  Smoothing using Psi and Phi
+        #  Compute local streamfunction psi
+        #
+        Psi=calc_localpsi(grd,fldU,fldV,xrng=xrngext,yrng=yrngext)
+        MPsi=np.zeros((lz,len(yy)+1,len(xx)+1))
+        #
+        #  Compute mean of Psi
+        #
+        for j in range(0,len(yy)+1):
+            mdata=np.nanmean(Psi[:,j:j+len(yrng),:],axis=1)
+            TMP=[np.nanmean(mdata[:,i:i+len(xrng)],axis=1) for i in range(0,len(xx)+1)]
+            MPsi[:,j,:]=np.asarray(TMP).T
+        #
+        #  Derivitive of Psi and Phi to get u and v
+        #
+        Us[:,yy[0]:yy[-1]+1,xx[0]:xx[-1]+1]=\
+            (-MPsi[:,1:,:-1]+MPsi[:,:-1,:-1])/grd.DYG[yy][:,xx]\
+            /grd.DRF/grd.hFacW[:,yy][:,:,xx]\
+            +(Phi[:,yy][:,:,xx]-Phi[:,yy][:,:,xx-1])/grd.DXC[yy][:,xx]
+        Vs[:,yy[0]:yy[-1]+1,xx[0]:xx[-1]+1]=\
+            (MPsi[:,:-1,1:]-MPsi[:,:-1,:-1])/grd.DXG[yy][:,xx]\
+            /grd.DRF/grd.hFacS[:,yy][:,:,xx]\
+            +(Phi[:,yy][:,:,xx]-Phi[:,yy-1][:,:,xx])/grd.DYC[yy][:,xx]
+
+        #lsx=len(xrng);lsy=len(yrng)
+        #lsx0=len(xrng01);lsy0=len(yrng01)
+        #psi11=np.mean(Psi[:,:-1,:-1].reshape(lz,lsx*lsy),axis=1)
+        #psi21=np.mean(Psi[:,1:,:-1].reshape(lz,lsx*lsy),axis=1)
+        #psi12=np.mean(Psi[:,:-1,1:].reshape(lz,lsx*lsy),axis=1)
+        #phi11=Phi[:,iy,ix];
+        #phi10=Phi[:,iy,ix-1];
+        #phi01=Phi[:,iy-1,ix];
+        #phi11=np.nanmean(Phi[:,yrng][:,:,xrng].reshape(lz,lsx*lsy),axis=1)
+        #phi10=np.nanmean(Phi[:,yrng][:,:,xrng01].reshape(lz,lsx0*lsy),axis=1)
+        #phi01=np.nanmean(Phi[:,yrng01][:,:,xrng].reshape(lz,lsx*lsy0),axis=1)
+
+        #Us[:,iy,ix]=(-psi21+psi11)/grd.DYG[iy,ix]/grd.DRF[:,0,0]/grd.hFacW[:,iy,ix]\
+        #   +(phi11-phi10)/grd.DXC[iy,ix]
+        #Vs[:,iy,ix]=(psi12-psi11)/grd.DXG[iy,ix]/grd.DRF[:,0,0]/grd.hFacS[:,iy,ix]\
+        #   +(phi11-phi01)/grd.DYC[iy,ix]
+        toc()
+        #
+        #  Smoothe u and v
+        #
+        #lsx=len(xrng);lsy=len(yrng);
+        #Um[:,iy,ix]=np.nanmean(ufld[:,yrng][:,:,xrng].reshape(lz,lsx*lsy),axis=1)
+        #Vm[:,iy,ix]=np.nanmean(vfld[:,yrng][:,:,xrng].reshape(lz,lsx*lsy),axis=1)
+
+#vrg=0.02
+#for ik in range(0,40):
+#    plt.figure(ik);
+#    plt.clf();
+#    plt.subplot(3,2,1)
+#    plt.imshow(ufld[ik,yrng][:,xrng]/grd.hFacW[ik,yrng][:,xrng],\
+#               interpolation='none',origin='lower',vmin=-vrg,vmax=vrg);
+#    plt.contour(ufld[ik,yrng][:,xrng]/grd.hFacW[ik,yrng][:,xrng],10)
+#    plt.subplot(3,2,3)
+#    plt.imshow(uconst[ik,...],\
+#               interpolation='none',origin='lower',vmin=-vrg,vmax=vrg);
+#    plt.contour(uconst[ik,...],10)
+#    plt.subplot(3,2,5)
+#    plt.imshow(ufld[ik,yrng][:,xrng]/grd.hFacW[ik,yrng][:,xrng]-uconst[ik,...],\
+#               interpolation='none',origin='lower',vmin=-vrg/10,vmax=vrg/10,cmap='bwr');
+#    plt.subplot(3,2,2)
+#    plt.imshow(vfld[ik,yrng][:,xrng]/grd.hFacS[ik,yrng][:,xrng],\
+#               interpolation='none',origin='lower',vmin=-vrg,vmax=vrg);
+#    plt.contour(vfld[ik,yrng][:,xrng]/grd.hFacS[ik,yrng][:,xrng],10)
+#    plt.subplot(3,2,4)
+#    plt.imshow(vconst[ik,...],\
+#               interpolation='none',origin='lower',vmin=-vrg,vmax=vrg);
+#    plt.contour(vconst[ik,...],10)
+#    plt.subplot(3,2,6)
+#    plt.imshow(vfld[ik,yrng][:,xrng]/grd.hFacS[ik,yrng][:,xrng]-vconst[ik,...],\
+#               interpolation='none',origin='lower',vmin=-vrg/10,vmax=vrg/10,cmap='bwr');
+#
+#plt.show()
